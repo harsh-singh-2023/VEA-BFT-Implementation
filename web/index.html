@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VEA-BFT Simulator</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#111827;--mute:#6b7280;--line:#e5e7eb;--acc:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--ink:#e5e7eb;--mute:#9ca3af;--line:#2a2f3a;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0 8px 0 0}
+select,button,input{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+button{cursor:pointer}button.primary{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.5;cursor:default}
+main{display:grid;grid-template-columns:300px minmax(0,1fr) 360px;gap:12px;padding:12px}
+@media(max-width:1100px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
+.row{display:flex;align-items:center;gap:6px;margin:4px 0}.row .grow{flex:1}
+.pill{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.mute{color:var(--mute)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}th,td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+tr.sel{background:color-mix(in srgb,var(--acc) 12%,transparent)}tbody tr{cursor:pointer}
+.mono{font-family:var(--mono);font-size:12px}
+#events{height:230px;overflow:auto;font-family:var(--mono);font-size:11.5px}#events div{padding:1px 0;border-bottom:1px dotted var(--line)}
+#pbft{max-height:260px;overflow:auto}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:700px){.charts{grid-template-columns:1fr}}
+svg text{fill:var(--mute);font:11px system-ui}.legend{font-size:12px;color:var(--mute)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat b{display:block;font-size:18px}
+.note{font-size:12px;color:var(--mute)}
+</style>
+</head>
+<body>
+<header>
+  <h1>VEA-BFT simulator</h1>
+  <span class="pill" id="chain">…</span>
+  <label>Dataset <select id="ds"><option value="heart">Cleveland Heart</option><option value="pima">Pima Diabetes</option><option value="wdbc">Wisconsin Breast Cancer</option></select></label>
+  <label>Bad-update policy <select id="policy"><option value="false">abort (paper)</option><option value="true">exclude-and-continue</option></select></label>
+  <label>Validators <select id="nv"><option>4</option><option>7</option></select></label>
+  <label><input type="checkbox" id="carry"> carry noise budget (β0=300, τ=100)</label>
+  <button id="init" class="primary">New simulation</button>
+  <span class="note">Paillier 256-bit prototype parameters: <b>not secure</b>.</span>
+</header>
+<main>
+  <section>
+    <div class="card"><h2>Hospitals <span class="note">(one-shot behaviour for the next round)</span></h2><div id="hosp"></div>
+      <div class="row"><button id="join">Join reserve hospital</button><button id="leave">Leave…</button></div></div>
+    <div class="card"><h2>Validators (PBFT, f=<span id="f">1</span>)</h2><div id="vals"></div></div>
+    <div class="card"><h2>Decryption committee</h2><div id="comm"></div>
+      <div class="row"><button id="rotate">Rotate committee</button><label class="note"><input type="checkbox" id="cheat"> dealer 1 cheats</label></div></div>
+    <div class="card"><h2>Run</h2>
+      <div class="row"><button id="run" class="primary grow">Run one round</button><button id="run5">×5</button></div>
+      <div class="row"><button id="boot" class="grow">Bootstrap noise budget</button></div>
+      <div class="note" id="busy"></div></div>
+  </section>
+  <section>
+    <div class="card stats" id="stats"></div>
+    <div class="card charts"><div><h2>Hold-out accuracy</h2><div id="c_acc"></div></div><div><h2>Hold-out log-loss</h2><div id="c_ll"></div></div></div>
+    <div class="legend" style="margin:-4px 4px 10px">● decrypted &nbsp; <span class="bad">✕ aborted</span> &nbsp; <span class="warn">◆ finalized, not decrypted</span></div>
+    <div class="card"><h2>Rounds <span class="note">(click a row for its PBFT log and audit)</span></h2>
+      <div style="overflow:auto"><table><thead><tr><th>#</th><th>status</th><th>view</th><th>S_r</th><th>acc</th><th>loss</th><th>β</th><th>gas</th><th>ms</th></tr></thead><tbody id="rounds"></tbody></table></div></div>
+  </section>
+  <section>
+    <div class="card"><h2>Round detail <span id="rtitle" class="mono"></span></h2><div id="rdetail" class="note">select a round</div>
+      <div class="row"><button id="audit" disabled>Audit this round</button></div><div id="auditout"></div></div>
+    <div class="card"><h2>PBFT messages</h2><div id="pbft" class="note">—</div></div>
+    <div class="card"><h2>Live log</h2><div id="events"></div></div>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const BEHAVIORS=["honest","oversize","replay","malformed","lie-norm","offline"];
+const FAULTS=["honest","silent","bad-aggregate","censor","wrong-budget","equivocate","bad-signature"];
+let S=null, sel=null, busy=false;
+const api=async(m,u,b)=>{const r=await fetch(u,{method:m,headers:{'content-type':'application/json'},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j};
+const opt=(arr,v)=>arr.map(a=>`<option ${a===v?'selected':''}>${a}</option>`).join('');
+function setBusy(b,msg){busy=b;document.querySelectorAll('button').forEach(x=>x.disabled=b||(x.id==='audit'&&!sel));$('busy').textContent=b?msg||'working…':''}
+
+function chart(el,vals,status,color){
+  const W=330,H=170,ml=38,mr=8,mt=8,mb=22;const v=vals.filter(Number.isFinite);
+  if(!v.length){el.innerHTML='<div class="note">no data yet</div>';return}
+  let lo=Math.min(...v),hi=Math.max(...v);const pad=(hi-lo||.02)*.15;lo-=pad;hi+=pad;
+  const n=Math.max(vals.length,2),x=i=>ml+i/(n-1)*(W-ml-mr),y=t=>H-mb-(t-lo)/(hi-lo)*(H-mt-mb);
+  let g='';for(let k=0;k<=3;k++){const t=lo+(hi-lo)*k/3;g+=`<line x1="${ml}" x2="${W-mr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${ml-4}" y="${y(t)+4}" text-anchor="end">${t.toFixed(3)}</text>`}
+  g+=`<text x="${(W+ml)/2}" y="${H-4}" text-anchor="middle">round</text><polyline fill="none" stroke="${color}" stroke-width="2" points="${vals.map((t,i)=>x(i)+','+y(t)).join(' ')}"/>`;
+  vals.forEach((t,i)=>{const s=status[i];const cx=x(i),cy=y(t);
+    g+= s==='aborted'?`<text x="${cx}" y="${cy+4}" text-anchor="middle" style="fill:var(--bad);font-weight:700">✕</text>`: s==='decrypted'?`<circle cx="${cx}" cy="${cy}" r="2.6" fill="${color}"/>`:`<text x="${cx}" y="${cy+4}" text-anchor="middle" style="fill:var(--warn)">◆</text>`});
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%">${g}</svg>`;
+}
+
+function render(){
+  if(!S||!S.initialised)return;
+  const c=S.chain;$('chain').textContent=`${c.kind} chain ${c.chainId} · ledger ${c.ledger.slice(0,8)}… · ${c.txs} txs · ${(c.gas/1e6).toFixed(1)}M gas`;
+  $('f').textContent=c.f;
+  const prevB=Object.fromEntries([...document.querySelectorAll('[data-h]')].map(e=>[e.dataset.h,e.value]));
+  $('hosp').innerHTML=S.hospitals.map(h=>`<div class="row"><span class="grow">${h.name} <span class="note">n=${h.n}</span></span>${h.active?`<select data-h="${h.index}">${opt(BEHAVIORS,prevB[h.index]||'honest')}</select>`:'<span class="pill">not joined</span>'}</div>`).join('');
+  const prevV=Object.fromEntries([...document.querySelectorAll('[data-v]')].map(e=>[e.dataset.v,e.value]));
+  $('vals').innerHTML=S.validators.map(v=>`<div class="row"><span class="grow">V${v.index} <span class="note mono">${v.address.slice(0,8)}…</span></span><select data-v="${v.index}">${opt(FAULTS,prevV[v.index]||'honest')}</select></div>`).join('');
+  const cm=S.committee;
+  $('comm').innerHTML=`<div class="note">epoch ${cm.epoch} · threshold ${cm.t}-of-${cm.n}</div>`+cm.members.map(m=>`<div class="row"><span class="grow">member ${m.index} <span class="note">@${m.hospital}</span></span><label class="note"><input type="checkbox" data-off="${m.index}"> offline</label></div>`).join('');
+  const last=S.history[S.history.length-1];
+  const ok=S.history.filter(h=>h.status==='decrypted').length,ab=S.history.filter(h=>h.status==='aborted').length;
+  $('stats').innerHTML=[['Accuracy',S.metrics.accuracy.toFixed(3)],['Log-loss',S.metrics.logLoss.toFixed(4)],['AUC',S.metrics.auc.toFixed(3)],['Rounds ok / aborted',`${ok} / ${ab}`],['Noise budget',c.noiseBudget],['Committee epoch',c.epoch],['Quorum',`${c.quorum} of ${S.validators.length}`],['Policy',S.config.excludePolicy?'exclude':'abort']].map(([k,v])=>`<div class="stat"><span class="note">${k}</span><b>${v}</b></div>`).join('');
+  const st=S.history.map(h=>h.status);
+  chart($('c_acc'),S.history.map(h=>h.metrics.accuracy),st,'var(--acc)');chart($('c_ll'),S.history.map(h=>h.metrics.logLoss),st,'#a855f7');
+  $('rounds').innerHTML=S.history.slice().reverse().map(h=>`<tr data-r="${h.round}" class="${sel===h.round?'sel':''}"><td>${h.round}</td><td class="${h.status==='decrypted'?'ok':h.status==='aborted'?'bad':'warn'}">${h.status}${h.abortReason?` <span class="note">(${h.abortReason})</span>`:''}</td><td>${h.finalView}</td><td>${h.included.join(',')||'–'}</td><td>${h.metrics.accuracy.toFixed(3)}</td><td>${h.metrics.logLoss.toFixed(4)}</td><td>${h.beta||''}</td><td>${(h.gas/1e6).toFixed(2)}M</td><td>${Math.round(h.ms)}</td></tr>`).join('');
+  document.querySelectorAll('#rounds tr').forEach(tr=>tr.onclick=()=>pick(+tr.dataset.r));
+  const hasReserve=S.hospitals.some(h=>!h.active);$('join').disabled=busy||!hasReserve;
+}
+async function pick(n){
+  sel=n;$('audit').disabled=busy;$('auditout').innerHTML='';render();
+  const r=await api('GET','/api/round/'+n);$('rtitle').textContent='#'+n;
+  $('rdetail').innerHTML=`<table><tbody>${r.hospitals.map(h=>`<tr><td>${h.name}</td><td>${h.behavior}</td><td class="${h.included?'ok':h.reject?'bad':'mute'}">${h.included?'included':h.reject?'rejected':h.submitted?'–':'offline'}</td><td class="note" style="white-space:normal">${h.reject||''}</td></tr>`).join('')}</tbody></table>
+  <div class="note" style="margin-top:6px">${r.networkMessages} network messages · final view ${r.finalView} · ${r.txs} txs · ${r.gas.toLocaleString()} gas<br>${r.rejections.slice(0,4).map(x=>'V'+x.replica+' rejected: '+x.reason).join('<br>')}${r.decryptNotes.length?'<br>'+r.decryptNotes.join('<br>'):''}</div>`;
+  const col={ 'PRE-PREPARE':'var(--acc)',PREPARE:'var(--warn)',COMMIT:'var(--ok)','VIEW-CHANGE':'var(--bad)'};
+  const msgs=r.consensusLog.filter(m=>m.to==='all'||m.type==='PRE-PREPARE');
+  $('pbft').innerHTML=`<table><tbody>${msgs.map(m=>`<tr><td class="mute">${m.seq}</td><td style="color:${col[m.type]}">${m.type}</td><td>V${m.from}${m.to==='all'?' → all':' → V'+m.to}</td><td>v${m.view}</td><td class="note">${m.note||''}</td></tr>`).join('')}</tbody></table>`;
+}
+async function refresh(){S=await api('GET','/api/state');render()}
+async function act(label,fn){setBusy(true,label);try{await fn()}catch(e){log('error',e.message)}finally{await refresh();setBusy(false);render()}}
+function roundBody(){
+  const behaviors={},validatorFaults={},off=[];
+  document.querySelectorAll('[data-h]').forEach(e=>{if(e.value!=='honest')behaviors[e.dataset.h]=e.value});
+  document.querySelectorAll('[data-v]').forEach(e=>{if(e.value!=='honest')validatorFaults[e.dataset.v]=e.value});
+  document.querySelectorAll('[data-off]').forEach(e=>{if(e.checked)off.push(+e.dataset.off)});
+  return {behaviors,validatorFaults,offlineCommittee:off,attackFactor:50};
+}
+async function runOnce(){const rep=await api('POST','/api/round',roundBody());await refresh();return rep}
+$('run').onclick=()=>act('running round…',async()=>{const r=await runOnce();await pick(r.round)});
+$('run5').onclick=()=>act('running 5 rounds…',async()=>{let r;for(let i=0;i<5;i++){r=await runOnce();render()}await pick(r.round)});
+$('boot').onclick=()=>act('bootstrapping…',()=>api('POST','/api/bootstrap'));
+$('join').onclick=()=>act('joining…',async()=>{const h=S.hospitals.find(h=>!h.active);await api('POST','/api/membership',{action:'join',index:h.index})});
+$('leave').onclick=()=>act('leaving…',async()=>{const act=S.hospitals.filter(h=>h.active);const n=prompt('Which hospital leaves? '+act.map(h=>h.name).join(', '),act[act.length-1].name);const h=act.find(x=>x.name===n);if(h)await api('POST','/api/membership',{action:'leave',index:h.index})});
+$('rotate').onclick=()=>act('resharing…',()=>api('POST','/api/rotate',{faultyDealers:$('cheat').checked?[1]:undefined}));
+$('audit').onclick=()=>act('auditing…',async()=>{const a=await api('GET','/api/audit/'+sel);$('auditout').innerHTML=`<div class="${a.ok?'ok':'bad'}" style="margin:6px 0"><b>${a.ok?'AUDIT PASSED':'AUDIT FAILED'}</b></div>`+a.checks.map(c=>`<div class="note"><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'}</span> ${c.name}${c.detail?` <span class="mono">(${c.detail})</span>`:''}</div>`).join('')});
+$('init').onclick=()=>act('creating federation (key generation)…',async()=>{sel=null;$('rdetail').textContent='select a round';$('pbft').textContent='—';$('auditout').innerHTML='';
+  const carry=$('carry').checked;await api('POST','/api/init',{dataset:$('ds').value,excludePolicy:$('policy').value==='true',validators:+$('nv').value,reserve:1,carryBudget:carry,...(carry?{beta0:300,tau:100}:{})})});
+function log(kind,msg){const d=document.createElement('div');d.innerHTML=`<span class="${kind==='error'||kind==='reject'||kind==='aborted'||kind==='stalled'?'bad':kind==='view-change'?'warn':kind==='finalized'||kind==='decrypted'?'ok':'mute'}">${kind}</span> ${msg.replace(/</g,'&lt;')}`;const e=$('events');e.appendChild(d);e.scrollTop=e.scrollHeight;while(e.children.length>300)e.firstChild.remove()}
+const es=new EventSource('/api/events');es.onmessage=m=>{const e=JSON.parse(m.data);if(e.kind==='reset')$('events').innerHTML='';else if(e.kind!=='tx')log(e.kind,e.msg)};
+refresh();
+</script>
+</body>
+</html>

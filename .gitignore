@@ -1,0 +1,8 @@
+node_modules/
+artifacts/
+cache/
+typechain-types/
+dist/
+runs/
+data/store/
+*.log

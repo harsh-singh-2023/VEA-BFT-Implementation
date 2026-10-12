@@ -1,0 +1,30 @@
+{
+  "name": "vea-bft",
+  "version": "1.0.0",
+  "description": "VEA-BFT: Verifiable Encrypted Aggregation with BFT validators for privacy-preserving federated learning in healthcare",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy": "tsx src/cli/deploy.ts",
+    "evaluate": "tsx src/cli/evaluate.ts",
+    "demo": "tsx src/cli/demo.ts",
+    "server": "tsx src/server/server.ts",
+    "dev": "tsx src/cli/dev.ts"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "hardhat": "^2.29.1",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
+    "typescript": "5.6"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0",
+    "express": "^5.3.0"
+  }
+}
