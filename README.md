@@ -20,6 +20,9 @@ npm run node & npm run deploy   # deploy + genesis to a standing node, writes de
 
 ## Architecture
 
+<img width="7198" height="9974" alt="diagram" src="https://github.com/user-attachments/assets/58a6792b-869a-4965-9e3f-be6f0610bcd1" />
+
+
 ```
  Hospital layer              Consensus layer (PBFT, 3f+1)                 Key-management layer
  ─────────────               ───────────────────────────────              ─────────────────────
